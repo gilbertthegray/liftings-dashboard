@@ -1149,7 +1149,7 @@ with tanks_tab:
                             color:#e8a825;
                         ">
                         🔒 <b>{lo["customer"]}</b><br/>
-                        <span style="color:#c8901a;">{lo["amount"]:,.0f} units</span>
+                        <span style="color:#c8901a;">{lo["amount"]:,.0f} BBLS</span>
                         </div>''',
                         unsafe_allow_html=True
                     )
@@ -1207,3 +1207,4 @@ st.download_button(
     file_name=f"forecast_{selected_month}.csv",
     mime="text/csv"
 )
+
