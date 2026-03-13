@@ -5,6 +5,7 @@ import numpy as np
 from datetime import timedelta
 from inventory_simulation import simulate_inventory_by_product
 from auth import check_password, logout
+from status_engine import evaluate_statuses, get_status, inactive_count
 
 # ==========================================================
 # PAGE CONFIG
@@ -178,6 +179,19 @@ with alloc_tab:
 
     st.subheader("Allocation Breakdown")
 
+    # ---- Evaluate statuses live from session state ----
+    _tank_levels  = st.session_state.get("tank_levels", {})
+    _lockouts     = st.session_state.get("lockouts", [])
+    _all_statuses = evaluate_statuses(df, _tank_levels, _lockouts)
+    _n_inactive   = inactive_count(_all_statuses)
+
+    if _n_inactive > 0:
+        st.error(
+            f"⚠️  **{_n_inactive} allocation(s) are currently INACTIVE** — "
+            "inventory is fully locked out for those products. "
+            "Update tank levels or lockouts in the 🛢️ Tank Levels tab."
+        )
+
     month_options = sorted(df["year_month"].dropna().unique())
 
     selected_month = st.selectbox(
@@ -197,6 +211,41 @@ with alloc_tab:
     location_df = month_df[
         month_df["location"] == selected_location
     ]
+
+    # ---- Full overview table for this location/month ----
+    st.markdown("### All Allocations — " + selected_location)
+    st.caption(
+        "Allocations marked INACTIVE have no available inventory — "
+        "all remaining stock is locked to another customer."
+    )
+
+    overview_rows = []
+    for _, row in location_df.iterrows():
+        s = get_status(_all_statuses, row["location"], row["product"], row["customer"])
+        overview_rows.append({
+            "Customer": row["customer"],
+            "Product":  row["product"],
+            "Liftings": f"{row['liftings']:,.0f}",
+            "Status":   s["status"].upper(),
+            "Reason":   s["reason"] or "—",
+        })
+
+    if overview_rows:
+        ov_df = pd.DataFrame(overview_rows)
+
+        def _style_status(val):
+            if val == "INACTIVE":
+                return (
+                    "background-color:#3d0000; color:#ff4444; "
+                    "font-weight:bold;"
+                )
+            return "color:#22c55e; font-weight:bold;"
+
+        styled = ov_df.style.map(_style_status, subset=["Status"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("### Drill-Down")
 
     selected_customer = st.selectbox(
         "Select Customer",
@@ -221,6 +270,31 @@ with alloc_tab:
     if allocation_row.empty:
         st.warning("No allocation found.")
     else:
+        alloc_status = get_status(
+            _all_statuses, selected_location, selected_product, selected_customer
+        )
+
+        if alloc_status["status"] == "inactive":
+            st.markdown(
+                "<div style=\"display:inline-block;background:#3d0000;"
+                "border:1.5px solid #ff4444;border-radius:8px;"
+                "padding:10px 20px;margin-bottom:12px;\">"
+                "<span style=\"color:#ff4444;font-size:18px;font-weight:bold;\">"
+                "🚫 INACTIVE</span><br/>"
+                f"<span style=\"color:#ffaaaa;font-size:13px;\">{alloc_status['reason']}</span>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                "<div style=\"display:inline-block;background:#003d1a;"
+                "border:1.5px solid #22c55e;border-radius:8px;"
+                "padding:10px 20px;margin-bottom:12px;\">"
+                "<span style=\"color:#22c55e;font-size:18px;font-weight:bold;\">"
+                "✅ ACTIVE</span></div>",
+                unsafe_allow_html=True
+            )
+
         total = allocation_row["liftings"].sum()
 
         month_dt = pd.to_datetime(selected_month)
@@ -230,18 +304,17 @@ with alloc_tab:
         )[1]
 
         weekly = total / 4
-        daily = total / days_in_month
+        daily  = total / days_in_month
 
         col1, col2, col3 = st.columns(3)
-
         col1.metric("Monthly Total", f"{total:,.0f}")
-        col2.metric("Weekly (÷4)", f"{weekly:,.0f}")
-        col3.metric("Daily", f"{daily:,.0f}")
+        col2.metric("Weekly (÷4)",   f"{weekly:,.0f}")
+        col3.metric("Daily",         f"{daily:,.0f}")
 
         st.markdown("---")
         st.dataframe(allocation_row, use_container_width=True)
 
-# ==========================================================
+
 # ================= INVENTORY SIMULATION TAB ===============
 # ==========================================================
 with inventory_tab:
