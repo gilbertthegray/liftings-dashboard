@@ -5,7 +5,7 @@ import numpy as np
 # CONFIG
 # ==================================
 
-START_DATE = "2022-01-01"
+START_DATE = "2026-04-01"
 MONTHS = 36
 OUTPUT_FILE = "monthly_fuel_liftings.csv"
 
