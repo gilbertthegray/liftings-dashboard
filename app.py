@@ -83,12 +83,13 @@ daily_df = load_daily_data()
 # ==========================================================
 # MAIN TOP TABS
 # ==========================================================
-forecast_tab, alloc_tab, inventory_tab, batch_tab, price_sim_tab = st.tabs([
+forecast_tab, alloc_tab, inventory_tab, batch_tab, price_sim_tab, tanks_tab = st.tabs([
     "📊 Forecast",
     "📦 Allocations",
     "🏭 Inventory Simulation",
     "🚚 Batch Planner",
-    "💹 Price Sensitivity"
+    "💹 Price Sensitivity",
+    "🛢️ Tank Levels"
 ])
 
 # ==========================================================
@@ -763,6 +764,344 @@ with price_sim_tab:
             mime="text/csv",
             key="ps_download"
         )
+
+
+# ==========================================================
+# ====================== TANK LEVELS TAB ===================
+# ==========================================================
+with tanks_tab:
+
+    st.subheader("Tank Inventory Levels")
+    st.caption("Enter current inventory for each product at the selected location. Lockouts reserve volume for a specific customer.")
+
+    # ---- Session state init ----
+    if "tank_levels" not in st.session_state:
+        st.session_state["tank_levels"] = {}   # key: (location, product) -> float
+    if "lockouts" not in st.session_state:
+        st.session_state["lockouts"] = []       # list of dicts: {location, product, customer, amount}
+    if "show_lockout_dialog" not in st.session_state:
+        st.session_state["show_lockout_dialog"] = False
+
+    # ---- Location selector ----
+    tank_location = st.selectbox(
+        "Select Location",
+        sorted(df["location"].unique()),
+        key="tank_location"
+    )
+
+    tank_products = sorted(df[df["location"] == tank_location]["product"].unique())
+    tank_customers = sorted(df[df["location"] == tank_location]["customer"].unique())
+
+    # ---- Max capacity input (shared for all tanks at location) ----
+    tank_max_capacity = st.number_input(
+        "Max Tank Capacity (per product)",
+        min_value=1000.0,
+        max_value=999_999_999.0,
+        value=1_000_000.0,
+        step=50_000.0,
+        key="tank_max_capacity",
+        help="Maximum volume each tank can hold. Used to calculate fill percentage."
+    )
+
+    st.markdown("---")
+    st.markdown("### Enter Current Inventory Levels")
+
+    # ---- Per-product inventory inputs ----
+    col_inputs = st.columns(min(len(tank_products), 4))
+    for i, product in enumerate(tank_products):
+        key = (tank_location, product)
+        current_val = st.session_state["tank_levels"].get(key, 0.0)
+        with col_inputs[i % 4]:
+            new_val = st.number_input(
+                f"{product}",
+                min_value=0.0,
+                max_value=float(tank_max_capacity),
+                value=current_val,
+                step=10_000.0,
+                key=f"tank_input_{tank_location}_{product}"
+            )
+            st.session_state["tank_levels"][key] = new_val
+
+    st.markdown("---")
+
+    # ---- Lockout dialog trigger ----
+    col_btn, _ = st.columns([1, 4])
+    with col_btn:
+        if st.button("🔒 Lock Out Inventory", type="primary", key="open_lockout_btn"):
+            st.session_state["show_lockout_dialog"] = True
+
+    # ---- Lockout dialog (rendered inline as an expander-style form) ----
+    if st.session_state["show_lockout_dialog"]:
+        with st.container():
+            st.markdown(
+                """
+                <div style="
+                    background: #1e2a3a;
+                    border: 1px solid #3a5068;
+                    border-radius: 10px;
+                    padding: 24px 28px;
+                    margin: 16px 0;
+                ">
+                <h4 style="color:#e8f4fd; margin-bottom:4px;">🔒 Lock Out Inventory</h4>
+                <p style="color:#7fa8c9; font-size:13px; margin-bottom:16px;">
+                    Reserve a volume of product at this location for a specific customer.
+                    Locked-out inventory will appear separately on the tank visual.
+                </p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            d_col1, d_col2 = st.columns(2)
+
+            with d_col1:
+                lockout_location = st.selectbox(
+                    "Location",
+                    sorted(df["location"].unique()),
+                    index=sorted(df["location"].unique()).index(tank_location),
+                    key="lockout_location"
+                )
+                lockout_product = st.selectbox(
+                    "Product",
+                    sorted(df[df["location"] == lockout_location]["product"].unique()),
+                    key="lockout_product"
+                )
+
+            with d_col2:
+                lockout_customers = sorted(df[df["location"] == lockout_location]["customer"].unique())
+                lockout_customer = st.selectbox(
+                    "Customer",
+                    lockout_customers,
+                    key="lockout_customer"
+                )
+                lockout_amount = st.number_input(
+                    "Amount to Lock Out",
+                    min_value=1.0,
+                    max_value=float(tank_max_capacity),
+                    value=50_000.0,
+                    step=5_000.0,
+                    key="lockout_amount"
+                )
+
+            btn_col1, btn_col2, _ = st.columns([1, 1, 4])
+
+            with btn_col1:
+                if st.button("✅ Submit", type="primary", key="lockout_submit"):
+                    st.session_state["lockouts"].append({
+                        "location": lockout_location,
+                        "product": lockout_product,
+                        "customer": lockout_customer,
+                        "amount": lockout_amount
+                    })
+                    st.session_state["show_lockout_dialog"] = False
+                    st.success(f"Locked out {lockout_amount:,.0f} of {lockout_product} for {lockout_customer} at {lockout_location}.")
+                    st.rerun()
+
+            with btn_col2:
+                if st.button("Cancel", key="lockout_cancel"):
+                    st.session_state["show_lockout_dialog"] = False
+                    st.rerun()
+
+    # ---- Build tank SVGs ----
+    st.markdown("---")
+    st.markdown("### Tank Visualization")
+
+    # Filter lockouts for current location
+    location_lockouts = [
+        lo for lo in st.session_state["lockouts"]
+        if lo["location"] == tank_location
+    ]
+
+    def build_tank_svg(product, current_volume, max_capacity, lockouts_for_product):
+        """
+        Build an SVG vertical cylindrical tank showing:
+        - Available inventory (blue gradient)
+        - Locked-out inventory segments (amber, stacked above available)
+        - Empty space (dark)
+        - Labels and percentage
+        """
+        W, H = 160, 320
+        tank_x, tank_y = 30, 20
+        tank_w, tank_h = 100, 260
+        ellipse_ry = 14  # ellipse height for top/bottom caps
+
+        total_lockout = sum(lo["amount"] for lo in lockouts_for_product)
+        available = max(0.0, current_volume - total_lockout)
+        pct_available = min(available / max_capacity, 1.0) if max_capacity > 0 else 0
+        pct_lockout = min(total_lockout / max_capacity, 1.0) if max_capacity > 0 else 0
+        pct_total = min(pct_available + pct_lockout, 1.0)
+
+        # Pixel heights within the tank body
+        fill_h_available = pct_available * tank_h
+        fill_h_lockout = pct_lockout * tank_h
+        fill_h_total = fill_h_available + fill_h_lockout
+
+        # Y positions (tank fills from bottom)
+        bottom_y = tank_y + tank_h
+        available_top_y = bottom_y - fill_h_available
+        lockout_top_y = available_top_y - fill_h_lockout
+
+        pct_display = int(pct_total * 100)
+
+        # Color choices
+        if pct_total > 0.6:
+            fluid_color1, fluid_color2 = "#1a6fa8", "#2596d4"
+        elif pct_total > 0.3:
+            fluid_color1, fluid_color2 = "#1a6fa8", "#2596d4"
+        else:
+            fluid_color1, fluid_color2 = "#a83232", "#d44040"
+
+        lockout_color1, lockout_color2 = "#b87c1a", "#e8a825"
+
+        svg_parts = [f'''<svg width="{W}" height="{H+60}" xmlns="http://www.w3.org/2000/svg" font-family="monospace">''']
+
+        # Defs: gradients
+        svg_parts.append(f'''
+  <defs>
+    <linearGradient id="grad_avail_{product}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="{fluid_color1}" stop-opacity="0.85"/>
+      <stop offset="50%" stop-color="{fluid_color2}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="{fluid_color1}" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="grad_lock_{product}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="{lockout_color1}" stop-opacity="0.85"/>
+      <stop offset="50%" stop-color="{lockout_color2}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="{lockout_color1}" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="tank_body_{product}" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0d1f30" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#142840" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0d1f30" stop-opacity="1"/>
+    </linearGradient>
+    <clipPath id="clip_{product}">
+      <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"/>
+    </clipPath>
+  </defs>''')
+
+        # Tank body background (empty)
+        svg_parts.append(f'''
+  <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"
+        fill="url(#tank_body_{product})" rx="0"/>'''  )
+
+        # Available fluid fill
+        if fill_h_available > 0:
+            svg_parts.append(f'''
+  <rect x="{tank_x}" y="{available_top_y:.1f}" width="{tank_w}" height="{fill_h_available:.1f}"
+        fill="url(#grad_avail_{product})" clip-path="url(#clip_{product})"/>'''  )
+
+        # Lockout fluid fill (stacked above available)
+        if fill_h_lockout > 0:
+            svg_parts.append(f'''
+  <rect x="{tank_x}" y="{lockout_top_y:.1f}" width="{tank_w}" height="{fill_h_lockout:.1f}"
+        fill="url(#grad_lock_{product})" clip-path="url(#clip_{product})"/>'''  )
+
+        # Fluid surface shimmer line (available)
+        if fill_h_available > 2:
+            svg_parts.append(f'''
+  <ellipse cx="{tank_x + tank_w//2}" cy="{available_top_y:.1f}" rx="{tank_w//2}" ry="{ellipse_ry//2}"
+           fill="{fluid_color2}" opacity="0.4"/>'''  )
+
+        # Fluid surface shimmer line (lockout)
+        if fill_h_lockout > 2:
+            svg_parts.append(f'''
+  <ellipse cx="{tank_x + tank_w//2}" cy="{lockout_top_y:.1f}" rx="{tank_w//2}" ry="{ellipse_ry//2}"
+           fill="{lockout_color2}" opacity="0.5"/>'''  )
+
+        # Tank border / shell
+        svg_parts.append(f'''
+  <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"
+        fill="none" stroke="#3a6080" stroke-width="2" rx="2"/>'''  )
+
+        # Top cap ellipse
+        svg_parts.append(f'''
+  <ellipse cx="{tank_x + tank_w//2}" cy="{tank_y}" rx="{tank_w//2}" ry="{ellipse_ry}"
+           fill="#0d1f30" stroke="#3a6080" stroke-width="2"/>'''  )
+
+        # Bottom cap ellipse
+        svg_parts.append(f'''
+  <ellipse cx="{tank_x + tank_w//2}" cy="{tank_y + tank_h}" rx="{tank_w//2}" ry="{ellipse_ry}"
+           fill="#0a1825" stroke="#3a6080" stroke-width="2"/>'''  )
+
+        # Tick marks (10%, 25%, 50%, 75%, 90%)
+        for tick_pct in [0.1, 0.25, 0.5, 0.75, 0.9]:
+            tick_y = bottom_y - tick_pct * tank_h
+            svg_parts.append(f'''
+  <line x1="{tank_x + tank_w - 10}" y1="{tick_y:.1f}" x2="{tank_x + tank_w}" y2="{tick_y:.1f}"
+        stroke="#3a6080" stroke-width="1" opacity="0.7"/>
+  <text x="{tank_x + tank_w + 4}" y="{tick_y + 4:.1f}" font-size="8" fill="#3a7090" opacity="0.8">{int(tick_pct*100)}%</text>'''  )
+
+        # Percentage text in center
+        svg_parts.append(f'''
+  <text x="{tank_x + tank_w//2}" y="{tank_y + tank_h//2 + 6}" text-anchor="middle"
+        font-size="22" font-weight="bold" fill="white" opacity="0.85">{pct_display}%</text>'''  )
+
+        # Product label at top
+        label_y = H + 20
+        svg_parts.append(f'''
+  <text x="{tank_x + tank_w//2}" y="{label_y}" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#c8dff0">{product}</text>'''  )
+
+        # Volume label
+        svg_parts.append(f'''
+  <text x="{tank_x + tank_w//2}" y="{label_y + 18}" text-anchor="middle"
+        font-size="10" fill="#7fa8c9">{current_volume:,.0f} / {max_capacity:,.0f}</text>'''  )
+
+        svg_parts.append("</svg>")
+        return "".join(svg_parts)
+
+    # ---- Render tanks in a row ----
+    num_products = len(tank_products)
+    tank_cols = st.columns(min(num_products, 5))
+
+    for i, product in enumerate(tank_products):
+        key = (tank_location, product)
+        current_vol = st.session_state["tank_levels"].get(key, 0.0)
+        prod_lockouts = [lo for lo in location_lockouts if lo["product"] == product]
+
+        with tank_cols[i % 5]:
+            svg = build_tank_svg(product, current_vol, tank_max_capacity, prod_lockouts)
+            st.markdown(f'''<div style="display:flex;justify-content:center;">{svg}</div>''', unsafe_allow_html=True)
+
+            # Show lockout badges below tank
+            if prod_lockouts:
+                for lo in prod_lockouts:
+                    st.markdown(
+                        f'''<div style="
+                            background:#2a1f05;
+                            border:1px solid #b87c1a;
+                            border-radius:6px;
+                            padding:6px 10px;
+                            margin:4px 0;
+                            font-size:12px;
+                            color:#e8a825;
+                        ">
+                        🔒 <b>{lo["customer"]}</b><br/>
+                        <span style="color:#c8901a;">{lo["amount"]:,.0f} units</span>
+                        </div>''',
+                        unsafe_allow_html=True
+                    )
+
+    # ---- Active lockouts summary table ----
+    if location_lockouts:
+        st.markdown("---")
+        st.markdown("### 🔒 Active Lockouts — " + tank_location)
+
+        lockout_df = pd.DataFrame(location_lockouts)
+        lockout_df.columns = ["Location", "Product", "Customer", "Locked Amount"]
+        lockout_df["Locked Amount"] = lockout_df["Locked Amount"].map("{:,.0f}".format)
+
+        col_table, col_clear = st.columns([4, 1])
+        with col_table:
+            st.dataframe(lockout_df, use_container_width=True, hide_index=True)
+        with col_clear:
+            st.markdown("<br/>", unsafe_allow_html=True)
+            if st.button("🗑️ Clear All Lockouts", key="clear_lockouts"):
+                st.session_state["lockouts"] = [
+                    lo for lo in st.session_state["lockouts"]
+                    if lo["location"] != tank_location
+                ]
+                st.rerun()
+
 
 # ==========================================================
 # GRAND TOTAL SECTION
