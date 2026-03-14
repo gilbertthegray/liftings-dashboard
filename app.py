@@ -12,7 +12,7 @@ from theme import inject_theme, render_header, kpi_row, section_header, status_b
 # PAGE CONFIG
 # ==========================================================
 st.set_page_config(
-    page_title="Liftings Forecast Dashboard",
+    page_title="GAM! Dashboard",
     layout="wide",
     page_icon="🛢️"
 )
@@ -1075,3 +1075,4 @@ st.download_button(
     file_name=f"forecast_{selected_month}.csv",
     mime="text/csv"
 )
+
