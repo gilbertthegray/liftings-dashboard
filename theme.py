@@ -330,7 +330,7 @@ def render_header(username: str) -> None:
     st.markdown(f"""
     <div class="nav-bar">
         <div class="nav-brand">
-            <div class="nav-logo">LF</div>
+            <div class="nav-logo">GAM</div>
             <div>
                 <div class="nav-title">GAM! Forecasting</div>
                 <div class="nav-subtitle">Operations Dashboard</div>
