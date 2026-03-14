@@ -6,14 +6,21 @@ from datetime import timedelta
 from inventory_simulation import simulate_inventory_by_product
 from auth import check_password, logout
 from status_engine import evaluate_statuses, get_status, inactive_count
+from theme import inject_theme, render_header, kpi_row, section_header, status_badge, build_tank_svg
 
 # ==========================================================
 # PAGE CONFIG
 # ==========================================================
 st.set_page_config(
     page_title="Liftings Forecast Dashboard",
-    layout="wide"
+    layout="wide",
+    page_icon="🛢️"
 )
+
+# ==========================================================
+# THEME — inject before auth so login screen is styled too
+# ==========================================================
+inject_theme()
 
 # ==========================================================
 # AUTH GATE — nothing renders below until login succeeds
@@ -21,12 +28,13 @@ st.set_page_config(
 if not check_password():
     st.stop()
 
-# ---- Logged-in header ----
-col_title, col_user = st.columns([6, 1])
-with col_title:
-    st.title("Monthly Liftings Forecast Dashboard")
-with col_user:
-    st.markdown(f"👤 **{st.session_state.get('username', '')}**")
+# ---- Persistent nav bar + sign-out ----
+_username = st.session_state.get("username", "")
+render_header(_username)
+
+# Sign-out lives in a small sidebar-less top-right button
+_sc1, _sc2, _sc3 = st.columns([8, 1, 1])
+with _sc3:
     if st.button("Sign Out", key="signout"):
         logout()
 
@@ -98,7 +106,7 @@ forecast_tab, alloc_tab, inventory_tab, batch_tab, price_sim_tab, tanks_tab = st
 # ==========================================================
 with forecast_tab:
 
-    st.subheader("Forecast Viewer")
+    section_header("Forecast Viewer", "Monthly liftings by customer and product")
 
     month_options = sorted(df["year_month"].dropna().unique())
 
@@ -160,24 +168,25 @@ with forecast_tab:
 
                 st.dataframe(location_df, use_container_width=True)
 
-                col1, col2 = st.columns(2)
-
-                col1.metric(
-                    "Original Total",
-                    f"{location_df['liftings'].sum():,.0f}"
-                )
-
-                col2.metric(
-                    "Scaled Total",
-                    f"{location_df['Scaled_Forecast'].sum():,.0f}"
-                )
+                _orig = location_df["liftings"].sum()
+                _scld = location_df["Scaled_Forecast"].sum()
+                _ddiff = _scld - _orig
+                kpi_row([
+                    {"label": "Original Total", "value": f"{_orig:,.0f}",
+                     "icon": "📊", "accent": "#4A9EFF"},
+                    {"label": "Scaled Total", "value": f"{_scld:,.0f}",
+                     "icon": "📈",
+                     "delta": f"{_ddiff:+,.0f}",
+                     "delta_positive": _ddiff >= 0,
+                     "accent": "#10B981" if _ddiff >= 0 else "#EF4444"},
+                ])
 
 # ==========================================================
 # ====================== ALLOCATIONS TAB ===================
 # ==========================================================
 with alloc_tab:
 
-    st.subheader("Allocation Breakdown")
+    section_header("Allocation Breakdown", "Customer and product allocations with live inventory status")
 
     # ---- Evaluate statuses live from session state ----
     _tank_levels  = st.session_state.get("tank_levels", {})
@@ -306,10 +315,11 @@ with alloc_tab:
         weekly = total / 4
         daily  = total / days_in_month
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Monthly Total", f"{total:,.0f}")
-        col2.metric("Weekly (÷4)",   f"{weekly:,.0f}")
-        col3.metric("Daily",         f"{daily:,.0f}")
+        kpi_row([
+            {"label": "Monthly Total", "value": f"{total:,.0f}",  "icon": "📅", "accent": "#4A9EFF"},
+            {"label": "Weekly (÷4)",   "value": f"{weekly:,.0f}", "icon": "📆", "accent": "#06B6D4"},
+            {"label": "Daily Avg",     "value": f"{daily:,.0f}",  "icon": "📋", "accent": "#8B5CF6"},
+        ])
 
         st.markdown("---")
         st.dataframe(allocation_row, use_container_width=True)
@@ -372,7 +382,7 @@ with inventory_tab:
 # ==========================================================
 with batch_tab:
 
-    st.subheader("Batch Scheduling Planner")
+    section_header("Batch Scheduling Planner", "Determine optimal order dates and batch sizes")
 
     monthly_planner, daily_planner = st.tabs([
         "📅 Monthly Forecast",
@@ -461,11 +471,12 @@ with batch_tab:
             st.markdown("---")
             col1, col2, col3 = st.columns(3)
 
-            col1.metric("Daily Burn", f"{daily_burn:,.0f}")
-            col2.metric("Safety Hit Date", safety_hit_date.strftime("%Y-%m-%d"))
-            col3.metric("Order By Date", order_date.strftime("%Y-%m-%d"))
-
-            st.metric("Recommended Batch Size", f"{batch_needed:,.0f}")
+            kpi_row([
+                {"label": "Daily Burn",        "value": f"{daily_burn:,.0f}",                    "icon": "🔥", "accent": "#F59E0B"},
+                {"label": "Safety Hit Date",   "value": safety_hit_date.strftime("%Y-%m-%d"),    "icon": "⚠️", "accent": "#EF4444"},
+                {"label": "Order By Date",     "value": order_date.strftime("%Y-%m-%d"),         "icon": "📦", "accent": "#4A9EFF"},
+                {"label": "Recommended Batch", "value": f"{batch_needed:,.0f}",                  "icon": "🚚", "accent": "#10B981"},
+            ])
 
     with daily_planner:
 
@@ -552,11 +563,12 @@ with batch_tab:
             st.markdown("---")
             col1, col2, col3 = st.columns(3)
 
-            col1.metric("Avg Daily Burn", f"{daily_burn_avg:,.0f}")
-            col2.metric("Safety Hit Date", hit_date.strftime("%Y-%m-%d"))
-            col3.metric("Order By Date", order_date.strftime("%Y-%m-%d"))
-
-            st.metric("Recommended Batch Size", f"{batch_needed:,.0f}")
+            kpi_row([
+                {"label": "Avg Daily Burn",    "value": f"{daily_burn_avg:,.0f}",            "icon": "🔥", "accent": "#F59E0B"},
+                {"label": "Safety Hit Date",   "value": hit_date.strftime("%Y-%m-%d"),       "icon": "⚠️", "accent": "#EF4444"},
+                {"label": "Order By Date",     "value": order_date.strftime("%Y-%m-%d"),     "icon": "📦", "accent": "#4A9EFF"},
+                {"label": "Recommended Batch", "value": f"{batch_needed:,.0f}",              "icon": "🚚", "accent": "#10B981"},
+            ])
 
         else:
             st.success("Inventory does not hit safety level this month.")
@@ -566,7 +578,7 @@ with batch_tab:
 # ==========================================================
 with price_sim_tab:
 
-    st.subheader("Price Sensitivity Simulation")
+    section_header("Price Sensitivity Simulation", "Model demand response to price changes using elasticity")
 
     st.markdown(
         """
@@ -710,25 +722,18 @@ with price_sim_tab:
         total_baseline_rev = results_df["Baseline Revenue"].sum()
         total_sim_rev = results_df["Simulated Revenue"].sum()
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric(
-            "Baseline Liftings",
-            f"{total_baseline_liftings:,.0f}"
-        )
-        m2.metric(
-            "Simulated Liftings",
-            f"{total_sim_liftings:,.0f}",
-            delta=f"{total_sim_liftings - total_baseline_liftings:+,.0f}"
-        )
-        m3.metric(
-            "Baseline Revenue",
-            f"${total_baseline_rev:,.0f}"
-        )
-        m4.metric(
-            "Simulated Revenue",
-            f"${total_sim_rev:,.0f}",
-            delta=f"${total_sim_rev - total_baseline_rev:+,.0f}"
-        )
+        _lift_delta = total_sim_liftings - total_baseline_liftings
+        _rev_delta  = total_sim_rev - total_baseline_rev
+        kpi_row([
+            {"label": "Baseline Liftings",  "value": f"{total_baseline_liftings:,.0f}", "icon": "📊", "accent": "#4A9EFF"},
+            {"label": "Simulated Liftings", "value": f"{total_sim_liftings:,.0f}",
+             "delta": f"{_lift_delta:+,.0f}", "delta_positive": _lift_delta >= 0,
+             "icon": "📈", "accent": "#10B981" if _lift_delta >= 0 else "#EF4444"},
+            {"label": "Baseline Revenue",   "value": f"${total_baseline_rev:,.0f}",    "icon": "💰", "accent": "#8B5CF6"},
+            {"label": "Simulated Revenue",  "value": f"${total_sim_rev:,.0f}",
+             "delta": f"${_rev_delta:+,.0f}", "delta_positive": _rev_delta >= 0,
+             "icon": "💹", "accent": "#10B981" if _rev_delta >= 0 else "#EF4444"},
+        ])
 
         st.markdown("#### Product-Level Breakdown")
 
@@ -844,7 +849,7 @@ with price_sim_tab:
 # ==========================================================
 with tanks_tab:
 
-    st.subheader("Tank Inventory Levels")
+    section_header("Tank Inventory Levels", "Live fill visualization with customer lockouts")
     st.caption("Enter current inventory for each product at the selected location. Lockouts reserve volume for a specific customer.")
 
     # ---- Session state init ----
@@ -985,142 +990,6 @@ with tanks_tab:
         if lo["location"] == tank_location
     ]
 
-    def build_tank_svg(product, current_volume, max_capacity, lockouts_for_product):
-        """
-        Build an SVG vertical cylindrical tank showing:
-        - Available inventory (blue gradient)
-        - Locked-out inventory segments (amber, stacked above available)
-        - Empty space (dark)
-        - Labels and percentage
-        """
-        W, H = 160, 320
-        tank_x, tank_y = 30, 20
-        tank_w, tank_h = 100, 260
-        ellipse_ry = 14  # ellipse height for top/bottom caps
-
-        total_lockout = sum(lo["amount"] for lo in lockouts_for_product)
-        available = max(0.0, current_volume - total_lockout)
-        pct_available = min(available / max_capacity, 1.0) if max_capacity > 0 else 0
-        pct_lockout = min(total_lockout / max_capacity, 1.0) if max_capacity > 0 else 0
-        pct_total = min(pct_available + pct_lockout, 1.0)
-
-        # Pixel heights within the tank body
-        fill_h_available = pct_available * tank_h
-        fill_h_lockout = pct_lockout * tank_h
-        fill_h_total = fill_h_available + fill_h_lockout
-
-        # Y positions (tank fills from bottom)
-        bottom_y = tank_y + tank_h
-        available_top_y = bottom_y - fill_h_available
-        lockout_top_y = available_top_y - fill_h_lockout
-
-        pct_display = int(pct_total * 100)
-
-        # Color choices
-        if pct_total > 0.6:
-            fluid_color1, fluid_color2 = "#1a6fa8", "#2596d4"
-        elif pct_total > 0.3:
-            fluid_color1, fluid_color2 = "#1a6fa8", "#2596d4"
-        else:
-            fluid_color1, fluid_color2 = "#a83232", "#d44040"
-
-        lockout_color1, lockout_color2 = "#b87c1a", "#e8a825"
-
-        svg_parts = [f'''<svg width="{W}" height="{H+60}" xmlns="http://www.w3.org/2000/svg" font-family="monospace">''']
-
-        # Defs: gradients
-        svg_parts.append(f'''
-  <defs>
-    <linearGradient id="grad_avail_{product}" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="{fluid_color1}" stop-opacity="0.85"/>
-      <stop offset="50%" stop-color="{fluid_color2}" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="{fluid_color1}" stop-opacity="0.85"/>
-    </linearGradient>
-    <linearGradient id="grad_lock_{product}" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="{lockout_color1}" stop-opacity="0.85"/>
-      <stop offset="50%" stop-color="{lockout_color2}" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="{lockout_color1}" stop-opacity="0.85"/>
-    </linearGradient>
-    <linearGradient id="tank_body_{product}" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#0d1f30" stop-opacity="1"/>
-      <stop offset="40%" stop-color="#142840" stop-opacity="1"/>
-      <stop offset="100%" stop-color="#0d1f30" stop-opacity="1"/>
-    </linearGradient>
-    <clipPath id="clip_{product}">
-      <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"/>
-    </clipPath>
-  </defs>''')
-
-        # Tank body background (empty)
-        svg_parts.append(f'''
-  <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"
-        fill="url(#tank_body_{product})" rx="0"/>'''  )
-
-        # Available fluid fill
-        if fill_h_available > 0:
-            svg_parts.append(f'''
-  <rect x="{tank_x}" y="{available_top_y:.1f}" width="{tank_w}" height="{fill_h_available:.1f}"
-        fill="url(#grad_avail_{product})" clip-path="url(#clip_{product})"/>'''  )
-
-        # Lockout fluid fill (stacked above available)
-        if fill_h_lockout > 0:
-            svg_parts.append(f'''
-  <rect x="{tank_x}" y="{lockout_top_y:.1f}" width="{tank_w}" height="{fill_h_lockout:.1f}"
-        fill="url(#grad_lock_{product})" clip-path="url(#clip_{product})"/>'''  )
-
-        # Fluid surface shimmer line (available)
-        if fill_h_available > 2:
-            svg_parts.append(f'''
-  <ellipse cx="{tank_x + tank_w//2}" cy="{available_top_y:.1f}" rx="{tank_w//2}" ry="{ellipse_ry//2}"
-           fill="{fluid_color2}" opacity="0.4"/>'''  )
-
-        # Fluid surface shimmer line (lockout)
-        if fill_h_lockout > 2:
-            svg_parts.append(f'''
-  <ellipse cx="{tank_x + tank_w//2}" cy="{lockout_top_y:.1f}" rx="{tank_w//2}" ry="{ellipse_ry//2}"
-           fill="{lockout_color2}" opacity="0.5"/>'''  )
-
-        # Tank border / shell
-        svg_parts.append(f'''
-  <rect x="{tank_x}" y="{tank_y}" width="{tank_w}" height="{tank_h}"
-        fill="none" stroke="#3a6080" stroke-width="2" rx="2"/>'''  )
-
-        # Top cap ellipse
-        svg_parts.append(f'''
-  <ellipse cx="{tank_x + tank_w//2}" cy="{tank_y}" rx="{tank_w//2}" ry="{ellipse_ry}"
-           fill="#0d1f30" stroke="#3a6080" stroke-width="2"/>'''  )
-
-        # Bottom cap ellipse
-        svg_parts.append(f'''
-  <ellipse cx="{tank_x + tank_w//2}" cy="{tank_y + tank_h}" rx="{tank_w//2}" ry="{ellipse_ry}"
-           fill="#0a1825" stroke="#3a6080" stroke-width="2"/>'''  )
-
-        # Tick marks (10%, 25%, 50%, 75%, 90%)
-        for tick_pct in [0.1, 0.25, 0.5, 0.75, 0.9]:
-            tick_y = bottom_y - tick_pct * tank_h
-            svg_parts.append(f'''
-  <line x1="{tank_x + tank_w - 10}" y1="{tick_y:.1f}" x2="{tank_x + tank_w}" y2="{tick_y:.1f}"
-        stroke="#3a6080" stroke-width="1" opacity="0.7"/>
-  <text x="{tank_x + tank_w + 4}" y="{tick_y + 4:.1f}" font-size="8" fill="#3a7090" opacity="0.8">{int(tick_pct*100)}%</text>'''  )
-
-        # Percentage text in center
-        svg_parts.append(f'''
-  <text x="{tank_x + tank_w//2}" y="{tank_y + tank_h//2 + 6}" text-anchor="middle"
-        font-size="22" font-weight="bold" fill="white" opacity="0.85">{pct_display}%</text>'''  )
-
-        # Product label at top
-        label_y = H + 20
-        svg_parts.append(f'''
-  <text x="{tank_x + tank_w//2}" y="{label_y}" text-anchor="middle"
-        font-size="13" font-weight="bold" fill="#c8dff0">{product}</text>'''  )
-
-        # Volume label
-        svg_parts.append(f'''
-  <text x="{tank_x + tank_w//2}" y="{label_y + 18}" text-anchor="middle"
-        font-size="10" fill="#7fa8c9">{current_volume:,.0f} / {max_capacity:,.0f}</text>'''  )
-
-        svg_parts.append("</svg>")
-        return "".join(svg_parts)
 
     # ---- Render tanks in a row ----
     num_products = len(tank_products)
@@ -1140,16 +1009,15 @@ with tanks_tab:
                 for lo in prod_lockouts:
                     st.markdown(
                         f'''<div style="
-                            background:#2a1f05;
-                            border:1px solid #b87c1a;
+                            background:rgba(245,158,11,0.08);
+                            border:1px solid rgba(245,158,11,0.3);
                             border-radius:6px;
-                            padding:6px 10px;
+                            padding:8px 12px;
                             margin:4px 0;
                             font-size:12px;
-                            color:#e8a825;
                         ">
-                        🔒 <b>{lo["customer"]}</b><br/>
-                        <span style="color:#c8901a;">{lo["amount"]:,.0f} BBLS</span>
+                        <span style="color:#F59E0B;font-weight:600;">🔒 {lo["customer"]}</span><br/>
+                        <span style="color:#94A3B8;font-family:'JetBrains Mono',monospace;font-size:11px;">{lo["amount"]:,.0f} units locked</span>
                         </div>''',
                         unsafe_allow_html=True
                     )
@@ -1180,18 +1048,18 @@ with tanks_tab:
 # GRAND TOTAL SECTION
 # ==========================================================
 st.markdown("---")
-st.subheader("📈 Grand Totals (All Locations)")
+section_header("Grand Totals", "Across all locations for selected filters")
 
 grand_original = filtered_df["liftings"].sum()
-grand_scaled = filtered_df["Scaled_Forecast"].sum()
+grand_scaled   = filtered_df["Scaled_Forecast"].sum()
+grand_delta    = grand_scaled - grand_original
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric("Total Original", f"{grand_original:,.0f}")
-
-with col2:
-    st.metric("Total Scaled", f"{grand_scaled:,.0f}")
+kpi_row([
+    {"label": "Total Original", "value": f"{grand_original:,.0f}", "icon": "📊", "accent": "#4A9EFF"},
+    {"label": "Total Scaled",   "value": f"{grand_scaled:,.0f}",
+     "delta": f"{grand_delta:+,.0f}", "delta_positive": grand_delta >= 0,
+     "icon": "📈", "accent": "#10B981" if grand_delta >= 0 else "#EF4444"},
+])
 
 # ==========================================================
 # DOWNLOAD BUTTON
@@ -1207,4 +1075,3 @@ st.download_button(
     file_name=f"forecast_{selected_month}.csv",
     mime="text/csv"
 )
-
