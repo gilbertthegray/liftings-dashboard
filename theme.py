@@ -332,7 +332,7 @@ def render_header(username: str) -> None:
         <div class="nav-brand">
             <div class="nav-logo">LF</div>
             <div>
-                <div class="nav-title">Liftings Forecast</div>
+                <div class="nav-title">GAM! Forecasting</div>
                 <div class="nav-subtitle">Operations Dashboard</div>
             </div>
         </div>
