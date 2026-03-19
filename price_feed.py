@@ -44,8 +44,8 @@ _FALLBACK_DATE = "Static default — no live data"
 # Unit:   cents per gallon -> we divide by 100 to get $/gallon
 # Docs:   https://www.eia.gov/opendata/browser/petroleum/pri/gnd
 _EIA_SERIES: dict[str, str] = {
-    "Gasoline":    "EMD_EPD2D_PTE_NUS_DPG",
-    "Diesel":      "EMD_EPM0D_PTE_NUS_DPG",
+    "REG":    "EMD_EPD2D_PTE_NUS_DPG",
+    "ULSD":      "EMD_EPM0D_PTE_NUS_DPG",
     "Heating Oil": "EMA_EPM0HO_PTE_NUS_DPG",
     "Premium":     "EMD_EPDC_PTE_NUS_DPG",
 }
