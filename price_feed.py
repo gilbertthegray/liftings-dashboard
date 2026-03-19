@@ -158,7 +158,7 @@ def _fetch_eia(product: str, api_key: Optional[str] = None) -> PriceResult:
             )
 
         cents   = float(value)
-        dollars = round(cents / 100.0, 3)
+        dollars = round(cents / 1, 3)
         period  = str(row.get("period", ""))
 
         stale = True
