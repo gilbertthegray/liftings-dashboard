@@ -7,7 +7,7 @@ from inventory_simulation import simulate_inventory_by_product
 from auth import check_password, logout
 from status_engine import evaluate_statuses, get_status, inactive_count
 from theme import inject_theme, render_header, kpi_row, section_header, status_badge, build_tank_svg
-from price_feed import get_live_prices, price_source_note
+from price_feed import get_live_prices, price_source_note, render_price_debug_panel
 
 # ==========================================================
 # PAGE CONFIG
@@ -596,6 +596,10 @@ with price_sim_tab:
 
     # ── Live price fetch ──────────────────────────────────────────────────────
     section_header("Today's Market Prices", "Pulled from EIA weekly retail data · Used as baseline")
+
+    # ── Debug panel — remove once prices are confirmed working ──────────────
+    render_price_debug_panel(tuple(products))
+    st.markdown("---")
 
     with st.spinner("Fetching current fuel prices…"):
         live_prices = get_live_prices(tuple(products))
