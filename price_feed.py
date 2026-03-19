@@ -47,7 +47,7 @@ _EIA_SERIES: dict[str, str] = {
     "REG":    "EMD_EPD2D_PTE_NUS_DPG",
     "ULSD":      "EMD_EPM0D_PTE_NUS_DPG",
     "Heating Oil": "EMA_EPM0HO_PTE_NUS_DPG",
-    "Premium":     "EMD_EPDC_PTE_NUS_DPG",
+    "PREM":     "EMD_EPDC_PTE_NUS_DPG",
 }
 
 _EIA_BASE = "https://api.eia.gov/v2/petroleum/pri/gnd/data/"
